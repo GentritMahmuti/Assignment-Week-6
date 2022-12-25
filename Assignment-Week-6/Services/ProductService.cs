@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using StackExchange.Redis;
 using System.Linq.Expressions;
+using System.Text.Json;
 
 namespace Assignment_Week_6.Services
 {
@@ -35,6 +36,7 @@ namespace Assignment_Week_6.Services
 
                 return product;
             });
+            var distributedCachedProduct = _connectionMultiplexer.GetDatabase().StringGet(String.Format(ProductCacheKeyConstants.GetById, id));
             return cachedProduct;
         }
         public async Task<List<Product>> GetAllProducts()
@@ -55,7 +57,8 @@ namespace Assignment_Week_6.Services
                 SlidingExpiration = TimeSpan.FromSeconds(20),
                 AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(8)
             });
-            _connectionMultiplexer.GetDatabase().StringSet("halo", product.ToString());
+            string jsonString = JsonSerializer.Serialize(product);
+            _connectionMultiplexer.GetDatabase().StringSet("HI", jsonString);
         }
 
         
@@ -92,7 +95,8 @@ namespace Assignment_Week_6.Services
             _productRepository.Delete(product);
 
             _memoryCache.Remove(String.Format(ProductCacheKeyConstants.GetById, product.Id));
-            
+
+            _connectionMultiplexer.GetDatabase().KeyDelete("HI"/*String.Format(ProductCacheKeyConstants.GetById, product.Id)*/);
         }
 
         
