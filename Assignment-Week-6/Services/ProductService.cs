@@ -29,6 +29,7 @@ namespace Assignment_Week_6.Services
 
         public async Task<Product> GetProduct(int id)
         {
+            //Check if a product is in memory cache; if it is not, get it from the database, save it to memory cache, and return the product. 
             var cachedProduct = await _memoryCache.GetOrCreateAsync(String.Format(ProductCacheKeyConstants.GetById, id), async entity =>
             {
                 Expression<Func<Product, bool>> expression = x => x.Id == id;
@@ -36,7 +37,15 @@ namespace Assignment_Week_6.Services
 
                 return product;
             });
+
+            if(cachedProduct == null)
+            {
+                throw new Exception("The entity could not be found! ");
+            }
+
+            //Get product from redis cache(distributed cache)
             var distributedCachedProduct = _connectionMultiplexer.GetDatabase().StringGet(String.Format(ProductCacheKeyConstants.GetById, id));
+
             return cachedProduct;
         }
         public async Task<List<Product>> GetAllProducts()
@@ -50,20 +59,25 @@ namespace Assignment_Week_6.Services
         {
             var product = _mapper.Map<Product>(productToCreate);
 
+            //Create a product in database
             _productRepository.Create(product);
 
+            //Save Product in memory cache with  expiring keys
             _memoryCache.Set<Product>(String.Format(ProductCacheKeyConstants.GetById, product.Id), product, new MemoryCacheEntryOptions
             {
                 SlidingExpiration = TimeSpan.FromSeconds(20),
                 AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(8)
             });
-            string jsonString = JsonSerializer.Serialize(product);
-            _connectionMultiplexer.GetDatabase().StringSet("HI", jsonString);
+
+            //Save product in redis cache
+            string productJsonString = JsonSerializer.Serialize(product);
+            _connectionMultiplexer.GetDatabase().StringSet(String.Format(ProductCacheKeyConstants.GetById, product.Id), productJsonString);
         }
 
         
         public async Task UpdateProduct(ProductDto productToUpdate)
         {
+            //Try get product from memory cache
             Product product = null;
             if (!_memoryCache.TryGetValue(String.Format(ProductCacheKeyConstants.GetById, productToUpdate.Id), out object result))
             {
@@ -78,8 +92,10 @@ namespace Assignment_Week_6.Services
             product.Description = productToUpdate.Description;
             product.Price = productToUpdate.Price;
 
+            //Update product in Sqlite database
             _productRepository.Update(product);
 
+            //Save updated product in memory chache
             _memoryCache.Set<Product>(String.Format(ProductCacheKeyConstants.GetById, product.Id), product, new MemoryCacheEntryOptions
             {
                 SlidingExpiration = TimeSpan.FromSeconds(20),
@@ -92,13 +108,18 @@ namespace Assignment_Week_6.Services
         {
             var product = await GetProduct(id);
 
+            if(product == null)
+            {
+                throw new Exception("The entity could not be found! ");
+            }
+            //Delete product from Sqlite database
             _productRepository.Delete(product);
 
+            //Delete product from memory cache
             _memoryCache.Remove(String.Format(ProductCacheKeyConstants.GetById, product.Id));
 
-            _connectionMultiplexer.GetDatabase().KeyDelete("HI"/*String.Format(ProductCacheKeyConstants.GetById, product.Id)*/);
+            //Delete product from Redis cache
+            _connectionMultiplexer.GetDatabase().KeyDelete(String.Format(ProductCacheKeyConstants.GetById, product.Id));
         }
-
-        
     }
 }
